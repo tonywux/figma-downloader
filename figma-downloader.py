@@ -2,6 +2,7 @@ import requests
 import os
 import json
 import time
+import logging
 from datetime import datetime
 from pathlib import Path
 import hashlib
@@ -12,13 +13,28 @@ load_dotenv()
 
 
 class FigmaDownloader:
-    def __init__(self, token, file_key, download_dir="./downloads", batch_size=10):
+    def __init__(self, token, file_key, download_dir="./downloads", batch_size=10, enable_logging=False):
         self.token = token
         self.file_key = file_key
         self.download_dir = Path(download_dir)
         self.batch_size = batch_size  # Process images in batches
         self.headers = {"X-Figma-Token": token}
         self.state_file = self.download_dir / "download_state.json"
+        
+        # Initialize execution summary tracking
+        self.execution_summary = {
+            'start_time': None,
+            'end_time': None,
+            'total_found': 0,
+            'new_downloaded': 0,
+            'skipped': 0,
+            'errors': 0,
+            'error_messages': []
+        }
+        
+        # Setup logging if enabled
+        if enable_logging:
+            self.setup_logging()
         
         # Create directories
         self.download_dir.mkdir(parents=True, exist_ok=True)
@@ -35,6 +51,31 @@ class FigmaDownloader:
         """Save current download state"""
         with open(self.state_file, 'w') as f:
             json.dump(self.downloaded_items, f, indent=2)
+    
+    def setup_logging(self):
+        """Setup file logging for scheduled runs"""
+        log_dir = Path("./logs")
+        log_dir.mkdir(exist_ok=True)
+        log_file = log_dir / "figma-downloader.log"
+        
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_file),
+                logging.StreamHandler()  # Also log to console
+            ]
+        )
+        self.logger = logging.getLogger(__name__)
+    
+    def get_execution_summary(self):
+        """Return execution summary for reporting"""
+        if self.execution_summary['start_time'] and self.execution_summary['end_time']:
+            duration = self.execution_summary['end_time'] - self.execution_summary['start_time']
+            self.execution_summary['duration_seconds'] = duration.total_seconds()
+            self.execution_summary['duration_formatted'] = str(duration).split('.')[0]  # Remove microseconds
+        
+        return self.execution_summary.copy()
     
     def get_file_data(self):
         """Get Figma file structure"""
@@ -242,8 +283,26 @@ class FigmaDownloader:
             
             return 0
     
+    def run_with_summary(self):
+        """Enhanced run method that returns execution summary"""
+        self.execution_summary['start_time'] = datetime.now()
+        
+        try:
+            result = self.run()
+            self.execution_summary['end_time'] = datetime.now()
+            return self.get_execution_summary()
+        except Exception as e:
+            self.execution_summary['end_time'] = datetime.now()
+            self.execution_summary['errors'] += 1
+            self.execution_summary['error_messages'].append(str(e))
+            if hasattr(self, 'logger'):
+                self.logger.error(f"Execution failed: {str(e)}")
+            raise e
+    
     def run(self):
         """Main execution function"""
+        if hasattr(self, 'logger'):
+            self.logger.info("🎨 Starting Figma screenshot download...")
         print("🎨 Starting Figma screenshot download...")
         
         try:
@@ -262,9 +321,15 @@ class FigmaDownloader:
             
             if not image_nodes:
                 print("✨ No images found in file")
+                if hasattr(self, 'logger'):
+                    self.logger.info("No images found in file")
+                self.execution_summary['total_found'] = 0
                 return
             
             print(f"📸 Found {len(image_nodes)} potential images")
+            if hasattr(self, 'logger'):
+                self.logger.info(f"Found {len(image_nodes)} potential images")
+            self.execution_summary['total_found'] = len(image_nodes)
             
             # Filter out already downloaded items
             new_nodes = []
@@ -273,8 +338,12 @@ class FigmaDownloader:
                 if item_hash not in self.downloaded_items:
                     new_nodes.append(node)
             
+            self.execution_summary['skipped'] = len(image_nodes) - len(new_nodes)
+            
             if not new_nodes:
                 print("✅ No new images to download")
+                if hasattr(self, 'logger'):
+                    self.logger.info("No new images to download - all images already exist")
                 return
             
             print(f"⬇️  Downloading {len(new_nodes)} new images...")
@@ -311,9 +380,18 @@ class FigmaDownloader:
                     time.sleep(3)
             
             print(f"🎉 Successfully downloaded {total_downloaded}/{len(new_nodes)} images to {today_dir}")
+            if hasattr(self, 'logger'):
+                self.logger.info(f"Successfully downloaded {total_downloaded}/{len(new_nodes)} images to {today_dir}")
+            
+            self.execution_summary['new_downloaded'] = total_downloaded
             
         except Exception as e:
             print(f"❌ Error: {str(e)}")
+            if hasattr(self, 'logger'):
+                self.logger.error(f"Error: {str(e)}")
+            self.execution_summary['errors'] += 1
+            self.execution_summary['error_messages'].append(str(e))
+            raise e
 
 def main():
     # Configuration
@@ -321,12 +399,17 @@ def main():
     FILE_KEY = os.getenv('FILE_KEY')
     DOWNLOAD_DIR = os.getenv('DOWNLOAD_DIR', './figma_downloads')
     BATCH_SIZE = int(os.getenv('BATCH_SIZE', 10))
+    ENABLE_LOGGING = os.getenv('ENABLE_LOGGING', 'false').lower() == 'true'
     
-    if FIGMA_TOKEN == "YOUR_FIGMA_TOKEN_HERE" or FILE_KEY == "YOUR_FILE_KEY_HERE":
-        print("❌ Please update the FIGMA_TOKEN and FILE_KEY in the script")
+    if not FIGMA_TOKEN or not FILE_KEY:
+        print("❌ Please set FIGMA_TOKEN and FILE_KEY environment variables")
         return
     
-    downloader = FigmaDownloader(FIGMA_TOKEN, FILE_KEY, DOWNLOAD_DIR, BATCH_SIZE)
+    if FIGMA_TOKEN == "YOUR_FIGMA_TOKEN_HERE" or FILE_KEY == "YOUR_FILE_KEY_HERE":
+        print("❌ Please update the FIGMA_TOKEN and FILE_KEY in the environment variables")
+        return
+    
+    downloader = FigmaDownloader(FIGMA_TOKEN, FILE_KEY, DOWNLOAD_DIR, BATCH_SIZE, ENABLE_LOGGING)
     downloader.run()
 
 if __name__ == "__main__":

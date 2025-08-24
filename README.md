@@ -1,6 +1,6 @@
 # Figma Downloader
 
-A Python service that automatically downloads images from Figma files with smart batching, duplicate detection, and retry logic.
+A Python service that automatically downloads images from Figma files with smart batching, duplicate detection, retry logic, and automated scheduling capabilities.
 
 ## Features
 
@@ -11,6 +11,9 @@ A Python service that automatically downloads images from Figma files with smart
 - 📁 **Organized Storage**: Creates date-based folders for downloads
 - ⚡ **High Resolution**: Downloads images at 2x scale for crisp quality
 - 🛡️ **Error Handling**: Graceful handling of API failures and network issues
+- ⏰ **Automated Scheduler**: Built-in cron-based scheduling with easy control commands
+- 📊 **Daily Reports**: Automatic generation of execution reports and statistics
+- 📋 **Logging**: Comprehensive logging system for monitoring and debugging
 
 ## Requirements
 
@@ -50,6 +53,10 @@ FILE_KEY=your_figma_file_key
 # Optional
 DOWNLOAD_DIR=./figma_downloads
 BATCH_SIZE=10
+SCHEDULE_CRON=0 22 * * *
+ENABLE_LOGGING=true
+REPORT_RETENTION_DAYS=30
+LOG_LEVEL=INFO
 ```
 
 ### Getting Your Figma Token
@@ -71,8 +78,27 @@ https://www.figma.com/design/FILE_KEY_HERE/Your-File-Name
 
 ### Basic Usage
 
+**Manual Run:**
 ```bash
 python figma-downloader.py
+```
+
+**Scheduled Automation:**
+```bash
+# Start the scheduler (runs automatically based on SCHEDULE_CRON)
+python control.py start
+
+# Check scheduler status
+python control.py status
+
+# Run immediately for testing
+python control.py run-now
+
+# Stop the scheduler
+python control.py stop
+
+# View recent logs
+python control.py logs
 ```
 
 ### Configuration Options
@@ -83,6 +109,10 @@ python figma-downloader.py
 | `FILE_KEY` | Required | The Figma file key from the URL |
 | `DOWNLOAD_DIR` | `./figma_downloads` | Directory to save downloaded images |
 | `BATCH_SIZE` | `10` | Number of images to process per batch |
+| `SCHEDULE_CRON` | `*/10 * * * *` | Cron schedule for automated runs |
+| `ENABLE_LOGGING` | `true` | Enable file logging for scheduled runs |
+| `REPORT_RETENTION_DAYS` | `30` | Days to keep in daily report history |
+| `LOG_LEVEL` | `INFO` | Logging verbosity (DEBUG, INFO, WARNING, ERROR) |
 
 ## How It Works
 
@@ -104,6 +134,9 @@ Downloads are organized in the following structure:
 ```
 figma_downloads/
 ├── download_state.json          # Tracks downloaded items
+├── daily-report.md              # Auto-generated execution reports
+├── logs/                        # Execution logs
+│   └── scheduler.log
 ├── 2024-01-15/                 # Date-based folders
 │   ├── 143022_button_primary_a1b2c3d4.png
 │   ├── 143025_icon_search_e5f6g7h8.png
@@ -151,6 +184,41 @@ Example state file:
 }
 ```
 
+## Scheduler Control
+
+The service includes a powerful scheduler system for automated downloads:
+
+### Control Commands
+
+| Command | Description |
+|---------|-------------|
+| `python control.py start` | Start the scheduler (adds to crontab) |
+| `python control.py stop` | Stop the scheduler (removes from crontab) |
+| `python control.py status` | Show current scheduler status |
+| `python control.py run-now` | Run the downloader immediately |
+| `python control.py logs` | Show recent log entries |
+| `python control.py help` | Show help information |
+
+### Schedule Configuration
+
+The `SCHEDULE_CRON` variable uses standard cron syntax:
+
+```env
+# Examples:
+SCHEDULE_CRON=*/10 * * * *    # Every 10 minutes (testing)
+SCHEDULE_CRON=0 22 * * *      # Daily at 10:00 PM
+SCHEDULE_CRON=0 */6 * * *     # Every 6 hours
+SCHEDULE_CRON=0 9 * * 1       # Every Monday at 9:00 AM
+```
+
+### Daily Reports
+
+The system automatically generates `daily-report.md` with:
+- Latest run status and statistics
+- Historical data (last 30 days by default)
+- Success rates and error tracking
+- Download summaries
+
 ## Troubleshooting
 
 ### Common Issues
@@ -169,6 +237,16 @@ Example state file:
 - Reduce the `BATCH_SIZE` environment variable
 - Check your internet connection
 - Some complex images may take longer to export
+
+**Scheduler not running**
+- Check status: `python control.py status`
+- View logs: `python control.py logs`
+- Test manual run: `python control.py run-now`
+- Verify cron permissions: `crontab -l`
+
+**"Permission denied" when starting scheduler**
+- Make sure scripts are executable: `chmod +x control.py run-scheduled.py`
+- Check that crontab is accessible
 
 ### Debug Mode
 
@@ -198,6 +276,13 @@ The service includes built-in rate limiting:
 This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Changelog
+
+### v2.0.0
+- Added automated scheduler with cron integration
+- Implemented control script for easy management
+- Added daily reporting system
+- Enhanced logging capabilities
+- Improved error handling and recovery
 
 ### v1.0.0
 - Initial release

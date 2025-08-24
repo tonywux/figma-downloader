@@ -1,5 +1,9 @@
 
 /venv
 /figma_downloads
+/__pycache__
+/logs
 
 .env
+
+daily-report.md
