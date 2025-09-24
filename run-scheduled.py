@@ -240,7 +240,7 @@ def main():
         FIGMA_TOKEN = os.getenv('FIGMA_TOKEN')
         FILE_KEY = os.getenv('FILE_KEY')
         DOWNLOAD_DIR = os.getenv('DOWNLOAD_DIR', './figma_downloads')
-        BATCH_SIZE = int(os.getenv('BATCH_SIZE', 10))
+        BATCH_SIZE = int(os.getenv('BATCH_SIZE', 30))
         
         # Validate configuration
         if not FIGMA_TOKEN or not FILE_KEY:

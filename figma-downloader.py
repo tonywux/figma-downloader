@@ -13,13 +13,18 @@ load_dotenv()
 
 
 class FigmaDownloader:
-    def __init__(self, token, file_key, download_dir="./downloads", batch_size=10, enable_logging=False):
+    def __init__(self, token, file_key, download_dir="./downloads", batch_size=30, enable_logging=False):
         self.token = token
         self.file_key = file_key
         self.download_dir = Path(download_dir)
         self.batch_size = batch_size  # Process images in batches
         self.headers = {"X-Figma-Token": token}
         self.state_file = self.download_dir / "download_state.json"
+        
+        # Rate limiting configuration (Professional + Dev: 10 requests/min for Tier 1)
+        self.rate_limit_requests_per_minute = 10
+        self.rate_limit_window = 60  # seconds
+        self.request_timestamps = []
         
         # Initialize execution summary tracking
         self.execution_summary = {
@@ -127,8 +132,27 @@ class FigmaDownloader:
         
         return nodes
     
+    def wait_for_rate_limit(self):
+        """Implement rate limiting to respect 10 requests/minute limit"""
+        current_time = time.time()
+        
+        # Remove timestamps older than the rate limit window
+        self.request_timestamps = [ts for ts in self.request_timestamps 
+                                 if current_time - ts < self.rate_limit_window]
+        
+        # If we're at the limit, wait until we can make another request
+        if len(self.request_timestamps) >= self.rate_limit_requests_per_minute:
+            oldest_request = min(self.request_timestamps)
+            wait_time = self.rate_limit_window - (current_time - oldest_request)
+            if wait_time > 0:
+                print(f"⏳ Rate limit reached. Waiting {wait_time:.1f} seconds...")
+                time.sleep(wait_time + 0.1)  # Add small buffer
+        
+        # Record this request timestamp
+        self.request_timestamps.append(current_time)
+    
     def export_images_batch(self, node_ids, retry_count=3):
-        """Export a batch of images from Figma with retry logic"""
+        """Export a batch of images from Figma with retry logic and rate limiting"""
         if not node_ids:
             return {}
         
@@ -141,10 +165,29 @@ class FigmaDownloader:
         
         for attempt in range(retry_count):
             try:
+                # Apply rate limiting before making the request
+                self.wait_for_rate_limit()
+                
                 response = requests.get(url, headers=self.headers, params=params, timeout=30)
                 
                 if response.status_code == 200:
                     return response.json()
+                elif response.status_code == 429:
+                    # Handle rate limit error
+                    retry_after = int(response.headers.get('Retry-After', 60))
+                    rate_limit_type = response.headers.get('X-Figma-Rate-Limit-Type', 'unknown')
+                    plan_tier = response.headers.get('X-Figma-Plan-Tier', 'unknown')
+                    upgrade_link = response.headers.get('X-Figma-Upgrade-Link', '')
+                    
+                    print(f"⚠️  Rate limited (attempt {attempt + 1}): {rate_limit_type} limit on {plan_tier} plan")
+                    if upgrade_link:
+                        print(f"💡 Consider upgrading: {upgrade_link}")
+                    
+                    if attempt < retry_count - 1:
+                        print(f"⏳ Waiting {retry_after} seconds before retry...")
+                        time.sleep(retry_after)
+                    else:
+                        raise Exception(f"Rate limited after {retry_count} attempts. Retry after {retry_after} seconds.")
                 elif response.status_code == 400:
                     error_data = response.json()
                     if "timeout" in error_data.get('err', '').lower():
@@ -162,8 +205,9 @@ class FigmaDownloader:
                 if attempt == retry_count - 1:
                     raise Exception("Request timeout after multiple attempts")
             
-            # Wait before retry
-            time.sleep(2 ** attempt)  # Exponential backoff: 2, 4, 8 seconds
+            # Wait before retry (but not for rate limit errors, which have their own wait)
+            if response.status_code != 429:
+                time.sleep(2 ** attempt)  # Exponential backoff: 2, 4, 8 seconds
         
         return {}
     
@@ -251,10 +295,18 @@ class FigmaDownloader:
             return downloaded_count
             
         except Exception as e:
-            print(f"❌ Batch {batch_num} failed: {str(e)}")
+            error_msg = str(e)
+            print(f"❌ Batch {batch_num} failed: {error_msg}")
+            
+            # Enhanced logging for rate limit errors
+            if hasattr(self, 'logger'):
+                if "rate limited" in error_msg.lower() or "429" in error_msg:
+                    self.logger.warning(f"Rate limit encountered in batch {batch_num}: {error_msg}")
+                else:
+                    self.logger.error(f"Batch {batch_num} failed: {error_msg}")
             
             # If batch is too large, try splitting it further
-            if len(batch_nodes) > 1 and "timeout" in str(e).lower():
+            if len(batch_nodes) > 1 and ("timeout" in error_msg.lower() or "rate limited" in error_msg.lower()):
                 print(f"🔄 Splitting batch {batch_num} into smaller pieces...")
                 mid = len(batch_nodes) // 2
                 
@@ -267,8 +319,9 @@ class FigmaDownloader:
                     today_dir
                 )
                 
-                # Small delay between sub-batches
-                time.sleep(2)
+                # Small delay between sub-batches (longer for rate limit issues)
+                delay = 5 if "rate limited" in error_msg.lower() else 2
+                time.sleep(delay)
                 
                 # Process second half
                 count2 = self.process_batch(
@@ -280,6 +333,11 @@ class FigmaDownloader:
                 )
                 
                 return count1 + count2
+            
+            # Track errors in execution summary
+            self.execution_summary['errors'] += 1
+            if error_msg not in self.execution_summary['error_messages']:
+                self.execution_summary['error_messages'].append(error_msg)
             
             return 0
     
@@ -376,8 +434,8 @@ class FigmaDownloader:
                 
                 # Delay between batches to avoid rate limiting
                 if batch_num < total_batches:  # Don't wait after the last batch
-                    print(f"⏳ Waiting 3 seconds before next batch...")
-                    time.sleep(3)
+                    print(f"⏳ Waiting 6 seconds before next batch...")
+                    time.sleep(6)  # Increased delay for better rate limit compliance
             
             print(f"🎉 Successfully downloaded {total_downloaded}/{len(new_nodes)} images to {today_dir}")
             if hasattr(self, 'logger'):
@@ -398,7 +456,7 @@ def main():
     FIGMA_TOKEN = os.getenv('FIGMA_TOKEN')
     FILE_KEY = os.getenv('FILE_KEY')
     DOWNLOAD_DIR = os.getenv('DOWNLOAD_DIR', './figma_downloads')
-    BATCH_SIZE = int(os.getenv('BATCH_SIZE', 10))
+    BATCH_SIZE = int(os.getenv('BATCH_SIZE', 30))
     ENABLE_LOGGING = os.getenv('ENABLE_LOGGING', 'false').lower() == 'true'
     
     if not FIGMA_TOKEN or not FILE_KEY:

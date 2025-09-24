@@ -52,7 +52,7 @@ FILE_KEY=your_figma_file_key
 
 # Optional
 DOWNLOAD_DIR=./figma_downloads
-BATCH_SIZE=10
+BATCH_SIZE=30
 SCHEDULE_CRON=0 22 * * *
 ENABLE_LOGGING=true
 REPORT_RETENTION_DAYS=30
@@ -108,7 +108,7 @@ python control.py logs
 | `FIGMA_TOKEN` | Required | Your Figma personal access token |
 | `FILE_KEY` | Required | The Figma file key from the URL |
 | `DOWNLOAD_DIR` | `./figma_downloads` | Directory to save downloaded images |
-| `BATCH_SIZE` | `10` | Number of images to process per batch |
+| `BATCH_SIZE` | `30` | Number of images to process per batch |
 | `SCHEDULE_CRON` | `*/10 * * * *` | Cron schedule for automated runs |
 | `ENABLE_LOGGING` | `true` | Enable file logging for scheduled runs |
 | `REPORT_RETENTION_DAYS` | `30` | Days to keep in daily report history |
@@ -123,9 +123,25 @@ python control.py logs
    - Ellipses with image fills
    - Image components
 3. **Duplicate Check**: Compares against previously downloaded items using MD5 hashes
-4. **Batch Processing**: Groups images into batches to avoid API timeouts
-5. **Download**: Exports images as PNG at 2x resolution and saves them locally
-6. **State Tracking**: Maintains a `download_state.json` file to track progress
+4. **Rate Limiting**: Automatically throttles requests to comply with Figma's rate limits
+5. **Batch Processing**: Groups images into batches to avoid API timeouts
+6. **Download**: Exports images as PNG at 2x resolution and saves them locally
+7. **State Tracking**: Maintains a `download_state.json` file to track progress
+
+## Rate Limiting
+
+The downloader automatically handles Figma's rate limits:
+
+- **Professional + Dev/Full Seat**: 10 requests/minute for image exports (Tier 1 API)
+- **Automatic Throttling**: Built-in rate limiting to stay within limits
+- **429 Error Handling**: Automatically retries with proper `Retry-After` delays
+- **Batch Optimization**: Uses larger batch sizes (default 30) to minimize API calls
+- **Smart Delays**: 6-second delays between batches for rate limit compliance
+
+**Rate Limit Requirements by Plan:**
+- **Starter + Collab**: Up to 6 requests/month (very limited)
+- **Professional + Dev**: 15 requests/minute (recommended minimum)
+- **Organization + Dev**: 20 requests/minute (best performance)
 
 ## File Organization
 
