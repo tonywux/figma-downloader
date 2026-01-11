@@ -434,8 +434,8 @@ class FigmaDownloader:
                 
                 # Delay between batches to avoid rate limiting
                 if batch_num < total_batches:  # Don't wait after the last batch
-                    print(f"⏳ Waiting 6 seconds before next batch...")
-                    time.sleep(6)  # Increased delay for better rate limit compliance
+                    print(f"⏳ Waiting 20 seconds before next batch...")
+                    time.sleep(20)  # Increased delay for better rate limit compliance
             
             print(f"🎉 Successfully downloaded {total_downloaded}/{len(new_nodes)} images to {today_dir}")
             if hasattr(self, 'logger'):
