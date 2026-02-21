@@ -45,6 +45,13 @@ def cron_log_file():
     return os.getenv("CRON_LOG_FILE", "logs/scheduler.log")
 
 
+def resolved_cron_log_file():
+    configured = Path(cron_log_file())
+    if configured.is_absolute():
+        return str(configured)
+    return str(project_dir() / configured)
+
+
 def get_current_crontab():
     result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
     if result.returncode != 0:
@@ -74,14 +81,26 @@ def strip_existing_block(crontab_content):
 def build_cron_block():
     cwd = str(project_dir())
     py = python_command()
-    log_path = cron_log_file().replace('"', '\\"')
+    log_path = resolved_cron_log_file().replace('"', '\\"')
     detect = (
-        f"{detect_schedule()} cd \"{cwd}\" && "
-        f"{py} figma-downloader.py --mode detect >> \"{log_path}\" 2>&1"
+        f"{detect_schedule()} ("
+        f"echo \"=== [$(date '+\\%Y-\\%m-\\%d \\%H:\\%M:\\%S')] detect start ===\"; "
+        f"cd \"{cwd}\" || {{ echo \"ERROR: failed to cd to {cwd}\"; exit 1; }}; "
+        f"{py} figma-downloader.py --mode detect; "
+        f"rc=$?; "
+        f"echo \"=== [$(date '+\\%Y-\\%m-\\%d \\%H:\\%M:\\%S')] detect end (rc=$rc) ===\"; "
+        f"exit $rc"
+        f") >> \"{log_path}\" 2>&1"
     )
     download = (
-        f"{download_schedule()} cd \"{cwd}\" && "
-        f"{py} figma-downloader.py --mode download >> \"{log_path}\" 2>&1"
+        f"{download_schedule()} ("
+        f"echo \"=== [$(date '+\\%Y-\\%m-\\%d \\%H:\\%M:\\%S')] download start ===\"; "
+        f"cd \"{cwd}\" || {{ echo \"ERROR: failed to cd to {cwd}\"; exit 1; }}; "
+        f"{py} figma-downloader.py --mode download; "
+        f"rc=$?; "
+        f"echo \"=== [$(date '+\\%Y-\\%m-\\%d \\%H:\\%M:\\%S')] download end (rc=$rc) ===\"; "
+        f"exit $rc"
+        f") >> \"{log_path}\" 2>&1"
     )
 
     return "\n".join(
@@ -151,6 +170,7 @@ def status():
     print(f"Detect schedule (env):   {detect_schedule()}")
     print(f"Download schedule (env): {download_schedule()}")
     print(f"Log file (env):          {cron_log_file()}")
+    print(f"Log file (resolved):     {resolved_cron_log_file()}")
     if active:
         print("")
         print("Installed cron block:")
